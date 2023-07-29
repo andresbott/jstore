@@ -1,5 +1,5 @@
 # jStore
-Simple zero dependency in memory json store with on disk persistence capacity.
+Simple, zero dependency, in memory json store with on disk persistence capacity.
 
 jStore is not intended as quick way to have persistence for low traffic things like configuration files or 
 for easy POC projects.
@@ -24,3 +24,4 @@ for_, i := range items{
 
 ## TODO
 * review the manual flush use-case and make sure that it is usable
+* add example file
