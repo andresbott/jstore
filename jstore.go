@@ -3,48 +3,42 @@ package jstore
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
-	"reflect"
 	"sync"
 )
 
-type Db struct {
-	file  string
-	mutex sync.Mutex
+type Store struct {
+	file        string
+	mutex       sync.Mutex
+	rootContent map[string]interface{} // is a reference to the whole content to be stored in the DB
+	curContent  map[string]interface{} // is a reference to the current collection used
 
+	// flags
 	inMemory      bool
 	ManualFlush   bool
 	humanReadable bool
-
-	use     string
-	content map[string]interface{}
 }
 
+// todo rename
 type DbFlag int
 
 const (
-	HumanReadableJson DbFlag = iota
-	ManualFlush              // force manual flush instead of automatically write/read
+	MinimizedJson DbFlag = iota
+	ManualFlush          // force manual flush instead of automatically write/read
 )
+const InMemoryDb = "memory"
 
-func isFlagSet(in []DbFlag, search DbFlag) bool {
-	for i := 0; i < len(in); i++ {
-		if in[i] == search {
-			return true
-		}
-	}
-	return false
-}
+// todo rename
+func NewStore(file string, flags ...DbFlag) (*Store, error) {
 
-func New(file string, flags ...DbFlag) (*Db, error) {
-
-	db := Db{
+	c := map[string]interface{}{}
+	db := Store{
 		file:          file,
-		content:       map[string]interface{}{},
+		rootContent:   c,
+		curContent:    c,
 		inMemory:      true,
-		ManualFlush:   isFlagSet(flags, ManualFlush),
-		humanReadable: isFlagSet(flags, HumanReadableJson),
+		ManualFlush:   flagsContain(flags, ManualFlush),
+		humanReadable: !flagsContain(flags, MinimizedJson), // todo create unit test
 	}
 
 	// create a file
@@ -61,163 +55,93 @@ func New(file string, flags ...DbFlag) (*Db, error) {
 	return &db, nil
 }
 
-func (db *Db) DelCollection(in string) error {
-	delete(db.content, in)
-	if !db.inMemory && !db.ManualFlush {
-		return db.flushToFile()
+// todo better method name?
+
+func (db *Store) Child(k string) (*Store, error) {
+
+	db.curContent[k] = map[string]interface{}{}
+	child := Store{
+		file:          db.file,
+		curContent:    db.curContent[k].(map[string]interface{}),
+		rootContent:   db.rootContent,
+		inMemory:      db.inMemory,
+		ManualFlush:   db.ManualFlush,
+		humanReadable: db.humanReadable,
 	}
-	return nil
+
+	return &child, nil
 
 }
-func (db *Db) Collection(name string) *Collection {
-	col := Collection{
-		name: name,
-		db:   db,
-	}
-	return &col
-}
 
-type NonExistentCollectionErr struct{}
+func (db *Store) Set(k string, v interface{}) error {
+	db.mutex.Lock() // optimisation opportunity, make one mutex per collection instead of a global one
+	defer db.mutex.Unlock()
 
-func (e NonExistentCollectionErr) Error() string {
-	return "collection does not exists"
-}
-
-// colExists verifies that a collection has been set, or returns an error
-func (db *Db) colExists(name string) bool {
-	if _, ok := db.content[name]; !ok {
-		return false
-	}
-	return true
-}
-
-type Collection struct {
-	name string
-	db   *Db
-}
-
-// Write sets the complete content of the collection to the passed object no mather if this is a single object or a list.
-func (col *Collection) Write(in interface{}) error {
-
-	// todo add an isvalid type check?
-
-	col.db.mutex.Lock() // optimisation opportunity, make one mutex per collection instead of a global one
-	defer col.db.mutex.Unlock()
-
-	b, err := json.Marshal(in)
+	b, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
 
-	if !isSingle(in) {
-		var data []interface{}
-		err = json.Unmarshal(b, &data)
-		if err != nil {
-			return err
-		}
-		col.db.content[col.name] = data
-	} else {
+	switch payloadType(v) {
+	case payloadSingleStruct:
 		var data map[string]interface{}
 		err = json.Unmarshal(b, &data)
 		if err != nil {
 			return err
 		}
-		col.db.content[col.name] = data
-	}
-	if !col.db.inMemory && !col.db.ManualFlush {
-		return col.db.flushToFile()
-	}
-	return nil
-}
-
-// Read returns the whole collection into passed item
-func (col *Collection) Read(in any) error {
-	if !col.db.colExists(col.name) {
-		return NonExistentCollectionErr{}
-	}
-
-	col.db.mutex.Lock() // optimisation opportunity, make one mutex per collection instead of a global one
-	defer col.db.mutex.Unlock()
-
-	if !col.db.inMemory {
-		err := col.db.readFile()
+		db.curContent[k] = data
+	case payloadMultiple:
+		var data []interface{}
+		err = json.Unmarshal(b, &data)
 		if err != nil {
 			return err
 		}
+		db.curContent[k] = data
+	case payloadSingleItem:
+		var data interface{}
+		err = json.Unmarshal(b, &data)
+		if err != nil {
+			return err
+		}
+		db.curContent[k] = data
+	case payloadNotSupported:
+		return fmt.Errorf("unable to stor the type of value")
 	}
 
-	jsonData, err := json.Marshal(col.db.content[col.name])
-	if err != nil {
-		return err
+	if !db.inMemory && !db.ManualFlush {
+		return db.flushToFile()
 	}
+	return nil
+}
 
-	err = json.Unmarshal(jsonData, &in)
+func (db *Store) flushToFile() error {
+
+	bytes := db.Json()
+	err := os.WriteFile(db.file, bytes, 0644)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func isSingle(in any) bool {
-	rt := reflect.TypeOf(in)
-	switch rt.Kind() {
-	case reflect.Slice:
-		return false
-	case reflect.Array:
-		return false
-	default:
-		return true
-	}
-}
-
-func (db *Db) flushToFile() error {
-
+func (db *Store) Json() []byte {
 	var bytes []byte
 	var err error
+	// json.Marshal function can return two types of errors: UnsupportedTypeError or UnsupportedValueError
+	// both cases are handled when adding data with Set, hence omitting error handling here
 	if db.humanReadable {
-		bytes, err = json.MarshalIndent(db.content, "", "    ")
+		bytes, err = json.MarshalIndent(db.rootContent, "", "    ")
 		if err != nil {
-			return err
+			panic(err)
 		}
 	} else {
-		bytes, err = json.Marshal(db.content)
+		bytes, err = json.Marshal(db.rootContent)
 		if err != nil {
-			return err
+			panic(err)
 		}
 	}
-
-	err = os.WriteFile(db.file, bytes, 0644)
-	if err != nil {
-		return err
-	}
-	return nil
+	return bytes
 }
 
-func (db *Db) readFile() error {
-	f, err := os.Open(db.file)
-	if err != nil {
-		return fmt.Errorf("unable to open file: %v", err)
-	}
-	defer f.Close()
-
-	bytes, err := io.ReadAll(f)
-	if err != nil {
-		return fmt.Errorf("unable to read file: %v", err)
-	}
-
-	if len(bytes) == 0 {
-		return fmt.Errorf("file is empty")
-	}
-
-	var data map[string]interface{}
-	err = json.Unmarshal(bytes, &data)
-	if err != nil {
-		return fmt.Errorf("unable to unmarshal file: %v", err)
-	}
-
-	for k, v := range data {
-		db.content[k] = v
-	}
-
-	return nil
-}
+// todo create method for reading the keys
+// todo create method for appending to a key value

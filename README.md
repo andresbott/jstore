@@ -25,3 +25,11 @@ for_, i := range items{
 ## TODO
 * review the manual flush use-case and make sure that it is usable
 * add example file
+
+TODO:
+
+ DB returns a kv instance that allows to set+get on the json file
+ collection with a key returns a new db struct that allows to write values at a nested level
+ add a safeguard so that a key cannot be set if it is a collection
+ 
+add method to insert single item into the collection
