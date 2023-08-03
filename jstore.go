@@ -10,23 +10,24 @@ import (
 )
 
 type Db struct {
-	file  string
-	mutex sync.Mutex
+	file    string
+	mutex   sync.Mutex
+	content map[string]interface{}
 
+	// flags
 	inMemory      bool
 	ManualFlush   bool
 	humanReadable bool
-
-	use     string
-	content map[string]interface{}
 }
 
 type DbFlag int
 
 const (
-	HumanReadableJson DbFlag = iota
-	ManualFlush              // force manual flush instead of automatically write/read
+	MinimizedJson DbFlag = iota
+	ManualFlush          // force manual flush instead of automatically write/read
 )
+
+const InMemoryDb = "memory"
 
 func isFlagSet(in []DbFlag, search DbFlag) bool {
 	for i := 0; i < len(in); i++ {
@@ -44,7 +45,7 @@ func New(file string, flags ...DbFlag) (*Db, error) {
 		content:       map[string]interface{}{},
 		inMemory:      true,
 		ManualFlush:   isFlagSet(flags, ManualFlush),
-		humanReadable: isFlagSet(flags, HumanReadableJson),
+		humanReadable: !isFlagSet(flags, MinimizedJson),
 	}
 
 	// create a file
@@ -67,23 +68,9 @@ func (db *Db) DelCollection(in string) error {
 		return db.flushToFile()
 	}
 	return nil
-
-}
-func (db *Db) Collection(name string) *Collection {
-	col := Collection{
-		name: name,
-		db:   db,
-	}
-	return &col
 }
 
-type NonExistentCollectionErr struct{}
-
-func (e NonExistentCollectionErr) Error() string {
-	return "collection does not exists"
-}
-
-// colExists verifies that a collection has been set, or returns an error
+// colExists returns true if the specific key for the collection exits, else it returns false
 func (db *Db) colExists(name string) bool {
 	if _, ok := db.content[name]; !ok {
 		return false
@@ -91,106 +78,33 @@ func (db *Db) colExists(name string) bool {
 	return true
 }
 
-type Collection struct {
-	name string
-	db   *Db
-}
-
-// Write sets the complete content of the collection to the passed object no mather if this is a single object or a list.
-func (col *Collection) Write(in interface{}) error {
-
-	// todo add an isvalid type check?
-
-	col.db.mutex.Lock() // optimisation opportunity, make one mutex per collection instead of a global one
-	defer col.db.mutex.Unlock()
-
-	b, err := json.Marshal(in)
-	if err != nil {
-		return err
-	}
-
-	if !isSingle(in) {
-		var data []interface{}
-		err = json.Unmarshal(b, &data)
-		if err != nil {
-			return err
-		}
-		col.db.content[col.name] = data
-	} else {
-		var data map[string]interface{}
-		err = json.Unmarshal(b, &data)
-		if err != nil {
-			return err
-		}
-		col.db.content[col.name] = data
-	}
-	if !col.db.inMemory && !col.db.ManualFlush {
-		return col.db.flushToFile()
-	}
-	return nil
-}
-
-// Read returns the whole collection into passed item
-func (col *Collection) Read(in any) error {
-	if !col.db.colExists(col.name) {
-		return NonExistentCollectionErr{}
-	}
-
-	col.db.mutex.Lock() // optimisation opportunity, make one mutex per collection instead of a global one
-	defer col.db.mutex.Unlock()
-
-	if !col.db.inMemory {
-		err := col.db.readFile()
-		if err != nil {
-			return err
-		}
-	}
-
-	jsonData, err := json.Marshal(col.db.content[col.name])
-	if err != nil {
-		return err
-	}
-
-	err = json.Unmarshal(jsonData, &in)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func isSingle(in any) bool {
-	rt := reflect.TypeOf(in)
-	switch rt.Kind() {
-	case reflect.Slice:
-		return false
-	case reflect.Array:
-		return false
-	default:
-		return true
-	}
-}
-
 func (db *Db) flushToFile() error {
 
+	bytes := db.Json()
+	err := os.WriteFile(db.file, bytes, 0644)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (db *Db) Json() []byte {
 	var bytes []byte
 	var err error
+	// json.Marshal function can return two types of errors: UnsupportedTypeError or UnsupportedValueError
+	// both cases are handled when adding data with Set, hence omitting error handling here
 	if db.humanReadable {
 		bytes, err = json.MarshalIndent(db.content, "", "    ")
 		if err != nil {
-			return err
+			panic(err)
 		}
 	} else {
 		bytes, err = json.Marshal(db.content)
 		if err != nil {
-			return err
+			panic(err)
 		}
 	}
-
-	err = os.WriteFile(db.file, bytes, 0644)
-	if err != nil {
-		return err
-	}
-	return nil
+	return bytes
 }
 
 func (db *Db) readFile() error {
@@ -219,5 +133,124 @@ func (db *Db) readFile() error {
 		db.content[k] = v
 	}
 
+	return nil
+}
+
+type payloadT int
+
+const (
+	payloadMultiple payloadT = iota
+	payloadSingleStruct
+	payloadSingleItem
+	payloadNotSupported
+)
+
+func payloadType(in any) payloadT {
+	rt := reflect.TypeOf(in)
+	switch rt.Kind() {
+	case reflect.Slice, reflect.Array:
+		return payloadMultiple
+	case reflect.String, reflect.Bool,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64, reflect.Complex64, reflect.Complex128:
+		return payloadSingleItem
+	case reflect.Struct:
+		return payloadSingleStruct
+	default:
+		return payloadNotSupported
+	}
+}
+
+type NonExistentCollectionErr struct{}
+
+func (e NonExistentCollectionErr) Error() string {
+	return "collection does not exists"
+}
+
+type UnsupportedData struct{}
+
+func (e UnsupportedData) Error() string {
+	return "the provided type of data is not supported"
+}
+
+// baseKv is the base struct on top what other collection types extend
+type baseKv struct {
+	name    string
+	db      *Db
+	content map[string]interface{}
+}
+
+func (kv *baseKv) set(key string, value interface{}) error {
+
+	dataType := payloadType(value)
+	// early data type check
+	if dataType == payloadNotSupported {
+		return UnsupportedData{}
+	}
+
+	kv.db.mutex.Lock() // optimisation opportunity, make one mutex per collection instead of a global one
+	defer kv.db.mutex.Unlock()
+
+	b, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+
+	switch dataType {
+	case payloadSingleStruct:
+		var data map[string]interface{}
+		err = json.Unmarshal(b, &data)
+		if err != nil {
+			return err
+		}
+		kv.content[key] = data
+	case payloadMultiple:
+		var data []interface{}
+		err = json.Unmarshal(b, &data)
+		if err != nil {
+			return err
+		}
+		kv.content[key] = data
+	case payloadSingleItem:
+		var data interface{}
+		err = json.Unmarshal(b, &data)
+		if err != nil {
+			return err
+		}
+		kv.content[key] = data
+	}
+
+	if !kv.db.inMemory && !kv.db.ManualFlush {
+		return kv.db.flushToFile()
+	}
+	return nil
+}
+
+func (kv *baseKv) get(key string, value interface{}) error {
+
+	if !kv.db.colExists(kv.name) {
+		return NonExistentCollectionErr{}
+	}
+
+	kv.db.mutex.Lock()
+	defer kv.db.mutex.Unlock()
+
+	if !kv.db.inMemory {
+		err := kv.db.readFile()
+		if err != nil {
+			return err
+		}
+	}
+
+	jsonData, err := json.Marshal(kv.content[key])
+	if err != nil {
+		return err
+	}
+
+	err = json.Unmarshal(jsonData, &value)
+	if err != nil {
+		return err
+	}
 	return nil
 }

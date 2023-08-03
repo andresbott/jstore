@@ -2,60 +2,48 @@ package jstore
 
 const kvKey = "kv"
 
+type Kv struct {
+	baseKv
+}
+
 // Kv is a simple key (string) to value (string) store in a specific collection
 // the default collection uses is called "kv"
-func (db *Db) Kv(col string) *Kv {
-	if col == "" {
-		col = kvKey
-	}
-	k := Kv{
-		name: col,
-		db:   db,
+func (db *Db) Kv(collection ...string) *Kv {
+	col := kvKey
+	if len(collection) > 0 && collection[0] != "" {
+		col = collection[0]
 	}
 
 	if !db.colExists(col) {
-		db.Collection(col).Write(map[string]string{})
+		db.content[col] = map[string]interface{}{}
+	}
+	k := Kv{
+		baseKv{
+			name:    col,
+			db:      db,
+			content: db.content[col].(map[string]interface{}),
+		},
 	}
 	return &k
 }
-
-type Kv struct {
-	name string
-	db   *Db
+func (kv *Kv) Set(key string, in interface{}) error {
+	return kv.baseKv.set(key, in)
 }
 
-func (kv *Kv) Set(key string, value string) error {
+func (kv *Kv) Get(key string, value interface{}) error {
+	return kv.baseKv.get(key, value)
+}
 
-	data := map[string]string{}
-	c := kv.db.Collection(kv.name)
-	err := c.Read(data)
-	if err != nil {
-		return err
-	}
-
-	data[key] = value
-	err = c.Write(data)
-	if err != nil {
-		return err
-	}
-	if kv.db.ManualFlush {
-		kv.db.mutex.Lock()
-		err = kv.db.flushToFile()
-		if err != nil {
-			return err
-		}
-		kv.db.mutex.Unlock()
+func (kv *Kv) Del(key string) error {
+	delete(kv.content, key)
+	if !kv.db.inMemory && !kv.db.ManualFlush {
+		return kv.db.flushToFile()
 	}
 	return nil
-
 }
-
-func (kv *Kv) Get(key string) (string, error) {
-	data := map[string]string{}
-	c := kv.db.Collection(kv.name)
-	err := c.Read(&data)
-	if err != nil {
-		return "", err
+func (kv *Kv) Exists(key string) bool {
+	if _, ok := kv.content[key]; !ok {
+		return false
 	}
-	return data[key], nil
+	return true
 }

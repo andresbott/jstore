@@ -16,7 +16,7 @@ application level
 
 ```Go
 items := []Item{}
-_ = col.Read(&items)
+_ = col.Get(&items)
 for_, i := range items{
 	// do something
 }
@@ -24,4 +24,3 @@ for_, i := range items{
 
 ## TODO
 * review the manual flush use-case and make sure that it is usable
-* add example file

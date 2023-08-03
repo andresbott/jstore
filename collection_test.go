@@ -5,57 +5,32 @@ import (
 	"testing"
 )
 
-func TestCreateAndUpdateKV(t *testing.T) {
+func TestCreateAndUpdateCollection(t *testing.T) {
 
-	key := "key"
 	t.Run("string", func(t *testing.T) {
 
 		db, err := New(InMemoryDb, MinimizedJson)
 		failOnErr(err, t)
-		kv := db.Kv()
+		col := db.Use(t.Name())
 
 		input := "a string"
-		err = kv.Set(key, input)
-		failOnErr(err, t, "unexpected error setting value: %v")
-
-		input = "second value"
-		err = kv.Set(key+"-2", input)
-		failOnErr(err, t, "unexpected error setting value: %v")
+		err = col.Set(input)
+		failOnErr(err, t)
 
 		updated := "another string"
-		err = kv.Set(key, updated)
-		failOnErr(err, t, "unexpected error setting value: %v")
+		err = col.Set(updated)
+		failOnErr(err, t)
 
 		got := ""
-		err = kv.Get(key, &got)
-		failOnErr(err, t, "unexpected error reading value: %v")
+		err = col.Get(&got)
+		failOnErr(err, t)
 
 		if diff := cmp.Diff(got, updated); diff != "" {
 			t.Errorf("unexpected value (-got +want)\n%s", diff)
 		}
 
-		expectedJson := `{"kv":{"key":"another string","key-2":"second value"}}`
+		expectedJson := `{"TestCreateAndUpdateCollection/string":"another string"}`
 		if diff := cmp.Diff(string(db.Json()), expectedJson); diff != "" {
-			t.Errorf("unexpected value (-got +want)\n%s", diff)
-		}
-
-		if exists := kv.Exists(key); exists != true {
-			t.Errorf("expecting key to exits")
-		}
-
-		// verify delete
-		err = kv.Del(key)
-		failOnErr(err, t, "unexpected error deleting key: %v")
-
-		if exists := kv.Exists(key); exists != false {
-			t.Errorf("expecting key to NOT exits")
-		}
-
-		gotDeleted := ""
-		err = kv.Get(key, &gotDeleted)
-		failOnErr(err, t, "unexpected error reading value: %v")
-
-		if diff := cmp.Diff(gotDeleted, ""); diff != "" {
 			t.Errorf("unexpected value (-got +want)\n%s", diff)
 		}
 	})
@@ -64,25 +39,25 @@ func TestCreateAndUpdateKV(t *testing.T) {
 
 		db, err := New(InMemoryDb, MinimizedJson)
 		failOnErr(err, t)
-		kv := db.Kv("ints")
+		col := db.Use(t.Name())
 
 		input := 100
-		err = kv.Set(key, input)
+		err = col.Set(input)
 		failOnErr(err, t)
 
 		updated := 200
-		err = kv.Set(key, updated)
+		err = col.Set(updated)
 		failOnErr(err, t)
 
 		got := 0
-		err = kv.Get(key, &got)
+		err = col.Get(&got)
 		failOnErr(err, t)
 
 		if diff := cmp.Diff(got, updated); diff != "" {
 			t.Errorf("unexpected value (-got +want)\n%s", diff)
 		}
 
-		expectedJson := `{"ints":{"key":200}}`
+		expectedJson := `{"TestCreateAndUpdateCollection/integer":200}`
 		if diff := cmp.Diff(string(db.Json()), expectedJson); diff != "" {
 			t.Errorf("unexpected value (-got +want)\n%s", diff)
 		}
@@ -92,46 +67,26 @@ func TestCreateAndUpdateKV(t *testing.T) {
 
 		db, err := New(InMemoryDb, MinimizedJson)
 		failOnErr(err, t)
-		kv := db.Kv("struct")
+		col := db.Use(t.Name())
 
 		input := testPayload{Id: 2}
-		err = kv.Set(key, input)
+		err = col.Set(input)
 		failOnErr(err, t)
 
 		updated := testPayload{Id: 3}
-		err = kv.Set(key, updated)
+		err = col.Set(updated)
 		failOnErr(err, t)
 
 		got := testPayload{}
-		err = kv.Get(key, &got)
+		err = col.Get(&got)
 		failOnErr(err, t)
 
 		if diff := cmp.Diff(got, updated); diff != "" {
 			t.Errorf("unexpected value (-got +want)\n%s", diff)
 		}
 
-		expectedJson := `{"struct":{"key":{"id":3,"name":"","sub":{"bolean":false,"time":"0001-01-01T00:00:00Z"}}}}`
+		expectedJson := `{"TestCreateAndUpdateCollection/struct":{"id":3,"name":"","sub":{"bolean":false,"time":"0001-01-01T00:00:00Z"}}}`
 		if diff := cmp.Diff(string(db.Json()), expectedJson); diff != "" {
-			t.Errorf("unexpected value (-got +want)\n%s", diff)
-		}
-
-		if exists := kv.Exists(key); exists != true {
-			t.Errorf("expecting key to exits")
-		}
-
-		// verify delete
-		err = kv.Del(key)
-		failOnErr(err, t, "unexpected error deleting key: %v")
-
-		if exists := kv.Exists(key); exists != false {
-			t.Errorf("expecting key to NOT exits")
-		}
-
-		gotDeleted := testPayload{}
-		err = kv.Get(key, &gotDeleted)
-		failOnErr(err, t, "unexpected error reading value: %v")
-
-		if diff := cmp.Diff(gotDeleted, testPayload{}); diff != "" {
 			t.Errorf("unexpected value (-got +want)\n%s", diff)
 		}
 	})
@@ -140,25 +95,25 @@ func TestCreateAndUpdateKV(t *testing.T) {
 
 		db, err := New(InMemoryDb, MinimizedJson)
 		failOnErr(err, t)
-		kv := db.Kv("slice")
+		col := db.Use(t.Name())
 
 		input := []testPayload{{Id: 1}}
-		err = kv.Set(key, input)
+		err = col.Set(input)
 		failOnErr(err, t)
 
-		updated := []testPayload{{Id: 3}, {Id: 4}}
-		err = kv.Set(key, updated)
+		updated := []testPayload{{Id: 3}}
+		err = col.Set(updated)
 		failOnErr(err, t)
 
 		got := []testPayload{}
-		err = kv.Get(key, &got)
+		err = col.Get(&got)
 		failOnErr(err, t)
 
 		if diff := cmp.Diff(got, updated); diff != "" {
 			t.Errorf("unexpected value (-got +want)\n%s", diff)
 		}
 
-		expectedJson := `{"slice":{"key":[{"id":3,"name":"","sub":{"bolean":false,"time":"0001-01-01T00:00:00Z"}},{"id":4,"name":"","sub":{"bolean":false,"time":"0001-01-01T00:00:00Z"}}]}}`
+		expectedJson := `{"TestCreateAndUpdateCollection/slice":[{"id":3,"name":"","sub":{"bolean":false,"time":"0001-01-01T00:00:00Z"}}]}`
 		if diff := cmp.Diff(string(db.Json()), expectedJson); diff != "" {
 			t.Errorf("unexpected value (-got +want)\n%s", diff)
 		}
@@ -167,14 +122,14 @@ func TestCreateAndUpdateKV(t *testing.T) {
 	t.Run("expect error", func(t *testing.T) {
 		db, err := New(InMemoryDb)
 		failOnErr(err, t)
-		kv := db.Kv(t.Name())
+		col := db.Use(t.Name())
 
 		input := "a string"
-		err = kv.Set(key, input)
+		err = col.Set(input)
 		failOnErr(err, t)
 
 		var got int
-		err = kv.Get(key, &got)
+		err = col.Get(&got)
 		if err == nil {
 			t.Error("Expecting error but none got")
 		} else {
@@ -184,17 +139,14 @@ func TestCreateAndUpdateKV(t *testing.T) {
 			}
 		}
 	})
-
 }
-func TestDeleteKV(t *testing.T) {
-	key := "the key"
-
+func TestDeleteCollection(t *testing.T) {
 	db, err := New(InMemoryDb)
 	failOnErr(err, t)
-	kv := db.Kv(t.Name())
+	col := db.Use(t.Name())
 
 	input := "a string"
-	err = kv.Set(key, input)
+	err = col.Set(input)
 	failOnErr(err, t)
 
 	// Delete
@@ -203,7 +155,7 @@ func TestDeleteKV(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	td3 := testPayload{}
-	err = kv.Get(key, &td3)
+	err = col.Get(&td3)
 	if err == nil {
 		t.Error("Expecting error but none got")
 	} else {
