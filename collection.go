@@ -21,3 +21,8 @@ func (col *Collection) Set(in interface{}) error {
 func (col *Collection) Get(value interface{}) error {
 	return col.baseKv.get(col.name, value)
 }
+
+// Add will append one item to the collection, as long as the value is a slice or an array
+func (col *Collection) Add(value interface{}) error {
+	return col.baseKv.append(col.name, value)
+}

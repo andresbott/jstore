@@ -115,5 +115,73 @@ func TestStoreBackends(t *testing.T) {
 		}
 	})
 }
+func TestAppendToSlice(t *testing.T) {
+
+	t.Run("append to existing slice", func(t *testing.T) {
+		db, err := New(InMemoryDb)
+		failOnErr(err, t)
+		col := db.Use(t.Name())
+
+		input := []testPayload{{Id: 1}}
+		err = col.set(t.Name(), input)
+		failOnErr(err, t)
+
+		err = col.append(t.Name(), testPayload{Id: 3})
+		failOnErr(err, t, "unable to append value: %v")
+
+		got := []testPayload{}
+		err = col.Get(&got)
+		failOnErr(err, t)
+
+		expect := []testPayload{{Id: 1}, {Id: 3}}
+		if diff := cmp.Diff(got, expect); diff != "" {
+			t.Errorf("unexpected value (-got +want)\n%s", diff)
+		}
+	})
+
+	t.Run("append multiple items", func(t *testing.T) {
+		db, err := New(InMemoryDb)
+		failOnErr(err, t)
+		col := db.Use(t.Name())
+
+		input := []testPayload{{Id: 1}}
+		err = col.set(t.Name(), input)
+		failOnErr(err, t)
+
+		err = col.append(t.Name(), []testPayload{{Id: 2}, {Id: 3}})
+		failOnErr(err, t, "unable to append value: %v")
+
+		got := []testPayload{}
+		err = col.Get(&got)
+		failOnErr(err, t)
+
+		expect := []testPayload{{Id: 1}, {Id: 2}, {Id: 3}}
+		if diff := cmp.Diff(got, expect); diff != "" {
+			t.Errorf("unexpected value (-got +want)\n%s", diff)
+		}
+	})
+
+	t.Run("append to empty slice", func(t *testing.T) {
+		db, err := New(InMemoryDb)
+		failOnErr(err, t)
+		col := db.Use(t.Name())
+
+		err = col.append(t.Name(), testPayload{Id: 1})
+		failOnErr(err, t, "unable to append value: %v")
+
+		err = col.append(t.Name(), testPayload{Id: 3})
+		failOnErr(err, t, "unable to append value: %v")
+
+		got := []testPayload{}
+		err = col.Get(&got)
+		failOnErr(err, t)
+
+		expect := []testPayload{{Id: 1}, {Id: 3}}
+		if diff := cmp.Diff(got, expect); diff != "" {
+			t.Errorf("unexpected value (-got +want)\n%s", diff)
+		}
+	})
+
+}
 
 // todo: write tests around manual flush

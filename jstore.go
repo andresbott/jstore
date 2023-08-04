@@ -254,3 +254,50 @@ func (kv *baseKv) get(key string, value interface{}) error {
 	}
 	return nil
 }
+
+// append adds one item of the type slice stored in value
+func (kv *baseKv) append(key string, value interface{}) error {
+
+	dataType := payloadType(value)
+
+	// early data type check
+	if dataType == payloadNotSupported {
+		return UnsupportedData{}
+	}
+
+	kv.db.mutex.Lock() // optimisation opportunity, make one mutex per collection instead of a global one
+	defer kv.db.mutex.Unlock()
+
+	b, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+
+	if kv.content[key] == nil {
+		kv.content[key] = []interface{}{}
+	}
+
+	switch dataType {
+	case payloadSingleStruct, payloadSingleItem:
+
+		var data interface{}
+		err = json.Unmarshal(b, &data)
+		if err != nil {
+			return err
+		}
+		kv.content[key] = append(kv.content[key].([]interface{}), data)
+
+	case payloadMultiple:
+		var data []interface{}
+		err = json.Unmarshal(b, &data)
+		if err != nil {
+			return err
+		}
+		kv.content[key] = append(kv.content[key].([]interface{}), data...)
+	default:
+		return UnsupportedData{}
+
+	}
+
+	return nil
+}
