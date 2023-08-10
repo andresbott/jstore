@@ -58,6 +58,10 @@ func New(file string, flags ...DbFlag) (*Db, error) {
 		f.Close()
 		db.inMemory = false
 	}
+	err := db.readFile()
+	if err !=nil{
+		return nil,err
+	}	
 
 	return &db, nil
 }
