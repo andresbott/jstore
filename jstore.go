@@ -58,10 +58,6 @@ func New(file string, flags ...DbFlag) (*Db, error) {
 		f.Close()
 		db.inMemory = false
 	}
-	err := db.readFile()
-	if err !=nil{
-		return nil,err
-	}	
 
 	return &db, nil
 }
@@ -172,6 +168,12 @@ func (e NonExistentCollectionErr) Error() string {
 	return "collection does not exists"
 }
 
+type ValueNotAPointer struct{}
+
+func (e ValueNotAPointer) Error() string {
+	return "the passed value is not a pointer"
+}
+
 type UnsupportedData struct{}
 
 func (e UnsupportedData) Error() string {
@@ -232,7 +234,9 @@ func (kv *baseKv) set(key string, value interface{}) error {
 }
 
 func (kv *baseKv) get(key string, value interface{}) error {
-
+	if reflect.ValueOf(value).Kind() != reflect.Ptr {
+		return ValueNotAPointer{}
+	}
 	if !kv.db.colExists(kv.name) {
 		return NonExistentCollectionErr{}
 	}
@@ -251,7 +255,6 @@ func (kv *baseKv) get(key string, value interface{}) error {
 	if err != nil {
 		return err
 	}
-
 	err = json.Unmarshal(jsonData, &value)
 	if err != nil {
 		return err

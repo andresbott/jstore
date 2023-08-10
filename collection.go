@@ -12,6 +12,7 @@ func (db *Db) Use(name string) *Collection {
 			content: db.content,
 		},
 	}
+	db.content[name] = []interface{}{}
 	return &col
 }
 func (col *Collection) Set(in interface{}) error {
